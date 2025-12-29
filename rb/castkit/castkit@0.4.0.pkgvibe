@@ -1,0 +1,117 @@
+---
+pkgvibe: 1
+package: castkit
+ecosystem: rb
+applies: ">=0.3.1"
+status: draft
+sources:
+  - README
+  - CHANGELOG
+---
+
+# Package Guidance: Castkit (v0.3.1+)
+
+## Preferred patterns
+- DTOs MUST inherit `Castkit::DataObject` and use the type DSL (`string`, `integer`, `array`, etc.).
+- Input validation without a full DTO model MUST use `Castkit::Contract` (service inputs, API payloads, commands).
+- Schemas SHOULD stay strict by default; relax only for backward-compat payloads.
+- Larger DTOs SHOULD group attributes with `required do` / `optional do` blocks.
+- Type and plugin registration MUST be centralized in an initializer via `Castkit.configure`.
+
+## Component choices
+- DTOs MUST use `Castkit::DataObject` for serialization/deserialization and lifecycle features.
+- Validation-only schemas MUST use `Castkit::Contract.build(:name)` or subclass `Castkit::Contract::Base`.
+- Nested structures SHOULD use nested `DataObject` classes or arrays with `of: :type`.
+- Custom types MUST be registered with `Castkit.configure { |c| c.register_type(:money, MoneyType) }`.
+- CLI scaffolding SHOULD use `castkit generate dataobject ...` / `castkit generate contract ...` for consistent shape.
+
+## Constraints
+- With strict mode enabled (default), unknown keys MUST raise unless `strict false` or `allow_unknown` is set.
+- Array attributes MUST declare element type with `of:`; configuration raises if `of:` is missing.
+- Unknown types MUST raise when `raise_type_errors` is true; only registered types (or built-in aliases) are accepted.
+- Contract attributes SHOULD use only supported options (e.g., `required`, `aliases`, `min`, `max`, `format`, `of`, `validator`, `unwrapped`, `prefix`, `force_type`); unsupported options raise.
+- When `enforce_unwrapped_prefix` is enabled, any attribute with `prefix` MUST set `unwrapped: true` or it raises.
+
+## Pitfalls
+- Array attributes MUST declare `of:`; missing `of:` can trigger runtime or configuration failures.
+- Relaxing strictness SHOULD pair with `warn_on_unknown` to avoid silent acceptance.
+- `transient` and `ignore` fields SHOULD NOT be relied on for serialization; `ignore_nil`/`ignore_blank` can drop output unexpectedly.
+- Type aliases (`:int`, `:bool`, `:uuid`) SHOULD NOT be treated as custom types; register custom types when real coercion is required.
+- When using root wrapping (`root :user`), callers MUST expect the wrapped payload shape.
+
+## Good examples
+
+### DTOs with strict defaults and grouped attributes
+```ruby
+class UserDto < Castkit::DataObject
+  required do
+    string :id
+    string :email
+  end
+
+  optional do
+    integer :age
+    array :roles, of: :string
+  end
+end
+```
+
+### Contract for input validation only
+```ruby
+UserInput = Castkit::Contract.build(:user_input) do
+  string :email
+  string :password, required: false
+end
+
+result = UserInput.validate(email: "a@b.com")
+result.success?
+```
+
+### Custom types and plugins in one initializer
+```ruby
+Castkit.configure do |config|
+  config.register_type(:money, MyApp::Types::Money)
+  config.register_plugin(:timestamps, MyApp::Plugins::Timestamps)
+end
+```
+
+### Relaxed schema with warnings (backward compat)
+```ruby
+class LegacyUserDto < Castkit::DataObject
+  strict false
+  warn_on_unknown true
+  string :id
+end
+```
+
+## Bad examples
+
+### Missing `of:` on array types
+```ruby
+class BadRolesDto < Castkit::DataObject
+  array :roles
+end
+```
+
+### Using Hash + ad-hoc validation instead of a Contract
+```ruby
+def validate_user(input)
+  raise "missing email" unless input[:email]
+  input
+end
+```
+
+### Accepting unknown keys silently
+```ruby
+class LooseDto < Castkit::DataObject
+  strict false
+  string :id
+end
+```
+
+### Declaring unregistered custom types
+```ruby
+class OrderDto < Castkit::DataObject
+  money :total
+end
+```
